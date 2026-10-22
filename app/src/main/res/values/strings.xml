@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">JARVIS Touch</string>
+    <string name="service_desc">Screen padhta hai aur tap/type/scroll karta hai, taaki AI agent aapke kehne par apps chala sake.</string>
+</resources>
