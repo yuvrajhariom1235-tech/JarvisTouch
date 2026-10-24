@@ -96,7 +96,7 @@ class MainActivity : Activity() {
                 prefs.getString("model", GEMINI_MODEL) ?: GEMINI_MODEL
             )
         }
-        btn("Stop") { AgentService.stopFlag = true }
+        btn("Stop") { AgentService.instance?.stopTask() }
 
         btn("App update check karo") { checkUpdate(true) }
 
@@ -155,7 +155,6 @@ class MainActivity : Activity() {
             key.isEmpty() -> Toast.makeText(this, "API key save karo", Toast.LENGTH_LONG).show()
             goal.isEmpty() -> Toast.makeText(this, "Command likho ya bolo", Toast.LENGTH_SHORT).show()
             else -> {
-                AgentService.stopFlag = false
                 svc.startTask(goal, key, url, model)
             }
         }

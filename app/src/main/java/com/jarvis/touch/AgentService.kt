@@ -21,7 +21,7 @@ class AgentService : AccessibilityService() {
     companion object {
         var instance: AgentService? = null
         var onStatus: ((String) -> Unit)? = null
-        @Volatile var stopFlag = false
+        @Volatile var generation = 0
         @Volatile var running = false
         const val MAX_STEPS = 20
 
@@ -56,21 +56,28 @@ If the goal is complete, reply with done. If you are stuck, reply with done and 
     private fun status(msg: String) { main.post { onStatus?.invoke(msg) } }
 
     fun startTask(goal: String, key: String, baseUrl: String, model: String) {
-        if (running) { status("Pehle se chal raha hai"); return }
+        val myGen = ++generation   // naya task purane ko replace kar deta hai
         running = true
-        Thread { runLoop(goal, key, baseUrl, model) }.start()
+        Thread { runLoop(goal, key, baseUrl, model, myGen) }.start()
     }
 
-    private fun runLoop(goal: String, key: String, baseUrl: String, model: String) {
+    fun stopTask() {
+        generation++
+        running = false
+        status("Stopped")
+    }
+
+    private fun runLoop(goal: String, key: String, baseUrl: String, model: String, gen: Int) {
         val history = ArrayList<String>()
         try {
             for (step in 1..MAX_STEPS) {
-                if (stopFlag) { status("Stopped"); return }
+                if (gen != generation) return
                 val screen = readScreen()
                 val prompt = "Goal: $goal\n\nPrevious actions:\n" +
                     (if (history.isEmpty()) "(none)" else history.takeLast(8).joinToString("\n")) +
                     "\n\nCurrent screen:\n$screen"
                 val reply = askLLM(key, baseUrl, model, prompt)
+                if (gen != generation) return
                 val action = parseAction(reply)
                 status("Step $step: $action")
                 if (action.optString("action") == "done") {
@@ -83,9 +90,9 @@ If the goal is complete, reply with done. If you are stuck, reply with done and 
             }
             status("Max steps reached")
         } catch (e: Exception) {
-            status("Error: ${e.message}")
+            if (gen == generation) status("Error: ${e.message}")
         } finally {
-            running = false
+            if (gen == generation) running = false
         }
     }
 
@@ -108,7 +115,7 @@ If the goal is complete, reply with done. If you are stuck, reply with done and 
         val c = URL(url).openConnection() as HttpURLConnection
         c.requestMethod = "POST"
         c.connectTimeout = 20000
-        c.readTimeout = 60000
+        c.readTimeout = 30000
         c.doOutput = true
         c.setRequestProperty("content-type", "application/json")
         if (anthropic) {
