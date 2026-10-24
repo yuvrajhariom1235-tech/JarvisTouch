@@ -23,7 +23,6 @@ class AgentService : AccessibilityService() {
         var onStatus: ((String) -> Unit)? = null
         @Volatile var stopFlag = false
         @Volatile var running = false
-        const val MODEL = "claude-sonnet-5-5"
         const val MAX_STEPS = 20
 
         const val SYSTEM = """You control an Android phone through an accessibility service. 
@@ -56,13 +55,13 @@ If the goal is complete, reply with done. If you are stuck, reply with done and 
 
     private fun status(msg: String) { main.post { onStatus?.invoke(msg) } }
 
-    fun startTask(goal: String, key: String) {
+    fun startTask(goal: String, key: String, baseUrl: String, model: String) {
         if (running) { status("Pehle se chal raha hai"); return }
         running = true
-        Thread { runLoop(goal, key) }.start()
+        Thread { runLoop(goal, key, baseUrl, model) }.start()
     }
 
-    private fun runLoop(goal: String, key: String) {
+    private fun runLoop(goal: String, key: String, baseUrl: String, model: String) {
         val history = ArrayList<String>()
         try {
             for (step in 1..MAX_STEPS) {
@@ -71,7 +70,7 @@ If the goal is complete, reply with done. If you are stuck, reply with done and 
                 val prompt = "Goal: $goal\n\nPrevious actions:\n" +
                     (if (history.isEmpty()) "(none)" else history.takeLast(8).joinToString("\n")) +
                     "\n\nCurrent screen:\n$screen"
-                val reply = askClaude(key, prompt)
+                val reply = askLLM(key, baseUrl, model, prompt)
                 val action = parseAction(reply)
                 status("Step $step: $action")
                 if (action.optString("action") == "done") {
@@ -90,27 +89,42 @@ If the goal is complete, reply with done. If you are stuck, reply with done and 
         }
     }
 
-    // ---------- Claude API ----------
-    private fun askClaude(key: String, user: String): String {
-        val body = JSONObject()
-            .put("model", MODEL)
-            .put("max_tokens", 300)
-            .put("system", SYSTEM)
-            .put("messages", JSONArray().put(JSONObject().put("role", "user").put("content", user)))
-        val c = URL("https://api.anthropic.com/v1/messages").openConnection() as HttpURLConnection
+    // ---------- LLM API (OpenAI-compatible, or Anthropic if URL has anthropic.com) ----------
+    private fun askLLM(key: String, baseUrl: String, model: String, user: String): String {
+        val anthropic = baseUrl.contains("anthropic.com")
+        val base = baseUrl.trim().trimEnd('/')
+        val url = if (anthropic) "$base/v1/messages" else "$base/chat/completions"
+        val body = JSONObject().put("model", model)
+        if (anthropic) {
+            body.put("max_tokens", 300).put("system", SYSTEM)
+                .put("messages", JSONArray().put(JSONObject().put("role", "user").put("content", user)))
+        } else {
+            body.put("max_tokens", 1000).put(
+                "messages", JSONArray()
+                    .put(JSONObject().put("role", "system").put("content", SYSTEM))
+                    .put(JSONObject().put("role", "user").put("content", user))
+            )
+        }
+        val c = URL(url).openConnection() as HttpURLConnection
         c.requestMethod = "POST"
         c.connectTimeout = 20000
         c.readTimeout = 60000
         c.doOutput = true
-        c.setRequestProperty("x-api-key", key)
-        c.setRequestProperty("anthropic-version", "2023-06-01")
         c.setRequestProperty("content-type", "application/json")
+        if (anthropic) {
+            c.setRequestProperty("x-api-key", key)
+            c.setRequestProperty("anthropic-version", "2023-06-01")
+        } else {
+            c.setRequestProperty("Authorization", "Bearer $key")
+        }
         c.outputStream.use { it.write(body.toString().toByteArray()) }
         val code = c.responseCode
         val stream = if (code in 200..299) c.inputStream else c.errorStream
         val text = stream.bufferedReader().use { it.readText() }
-        if (code !in 200..299) throw Exception("HTTP $code: ${text.take(200)}")
-        return JSONObject(text).getJSONArray("content").getJSONObject(0).getString("text")
+        if (code !in 200..299) throw Exception("HTTP $code: ${text.take(250)}")
+        val j = JSONObject(text)
+        return if (anthropic) j.getJSONArray("content").getJSONObject(0).getString("text")
+        else j.getJSONArray("choices").getJSONObject(0).getJSONObject("message").getString("content")
     }
 
     private fun parseAction(reply: String): JSONObject {
