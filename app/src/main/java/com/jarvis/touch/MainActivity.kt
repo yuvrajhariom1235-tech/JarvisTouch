@@ -11,7 +11,7 @@ import android.widget.*
 class MainActivity : Activity() {
     companion object {
         const val GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/openai"
-        const val GEMINI_MODEL = "gemini-flash-latest"
+        const val GEMINI_MODEL = "gemini-2.5-flash-lite,gemini-2.5-flash,gemini-flash-latest"
         const val OR_URL = "https://openrouter.ai/api/v1"
         const val OR_MODEL = "meta-llama/llama-3.3-70b-instruct:free"
         const val GROQ_URL = "https://api.groq.com/openai/v1"

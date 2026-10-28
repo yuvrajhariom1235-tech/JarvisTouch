@@ -76,7 +76,7 @@ If the goal is complete, reply with done. If you are stuck, reply with done and 
                 val prompt = "Goal: $goal\n\nPrevious actions:\n" +
                     (if (history.isEmpty()) "(none)" else history.takeLast(8).joinToString("\n")) +
                     "\n\nCurrent screen:\n$screen"
-                val reply = askLLM(key, baseUrl, model, prompt)
+                val reply = askWithFallback(key, baseUrl, model, prompt, gen)
                 if (gen != generation) return
                 val action = parseAction(reply)
                 status("Step $step: $action")
@@ -94,6 +94,28 @@ If the goal is complete, reply with done. If you are stuck, reply with done and 
         } finally {
             if (gen == generation) running = false
         }
+    }
+
+    // Model box me comma se kai models likh sakte ho; busy/limit (503/429/500) par agla model try hota hai
+    private fun askWithFallback(key: String, baseUrl: String, models: String, user: String, gen: Int): String {
+        val list = models.split(",").map { it.trim() }.filter { it.isNotEmpty() }
+        var last: Exception? = null
+        for (round in 0..1) {
+            for (m in list) {
+                if (gen != generation) throw Exception("stopped")
+                try {
+                    return askLLM(key, baseUrl, m, user)
+                } catch (e: Exception) {
+                    last = e
+                    val msg = e.message ?: ""
+                    if (msg.startsWith("HTTP 503") || msg.startsWith("HTTP 429") || msg.startsWith("HTTP 500")) {
+                        status("$m busy, doosra try kar raha hoon...")
+                        Thread.sleep(2500)
+                    } else throw e
+                }
+            }
+        }
+        throw last ?: Exception("failed")
     }
 
     // ---------- LLM API (OpenAI-compatible, or Anthropic if URL has anthropic.com) ----------
